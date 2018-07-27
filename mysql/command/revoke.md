@@ -1,0 +1,1 @@
+REVOKE create,drop,delete on blog.* FROM 'blog'@'192.168.1.%'; 
