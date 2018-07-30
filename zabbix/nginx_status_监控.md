@@ -66,3 +66,4 @@ print(main.nginx_status())
 $ grep nginx_status /etc/zabbix/zabbix_agentd.conf
 UserParameter=ngx_status[*],/etc/zabbix/scripts/nginx_status.py "$1"
 ```
+4.  在zabbix界面配置Items即可
