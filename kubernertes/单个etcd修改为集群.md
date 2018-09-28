@@ -138,5 +138,7 @@ c39c45ea12ff2451, started, 192.168.1.73, https://192.168.1.73:2380, https://192.
 
 查看k8s存储etcd的数据
 
-ETCDCTL_API=3 etcdctl   --endpoints=https://192.168.1.72:2379,https://192.168.1.73:2379,https://192.168.1.74:2379    --cacert=/etc/kubernetes/ca/ca.pem   --cert=/etc/kubernetes/ca/etcd/etcd.pem   --key=/etc/kubernetes/ca/etcd/etcd-key.pem get / --prefix --keys-only
+ETCDCTL_API=3 etcdctl   --endpoints=https://192.168.1.74:2379  --cacert=/etc/kubernetes/ca/ca.pem   --cert=/etc/kubernetes/ca/etcd/etcd.pem   --key=/etc/kubernetes/ca/etcd/etcd-key.pem get / --prefix --keys-only
+
+
 

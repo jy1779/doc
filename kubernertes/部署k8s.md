@@ -1,35 +1,63 @@
 部署k8s
 
 1.1安装docker
-git clone https://code.aliyun.com/jy1779/docker_install.git
-./docker_install/aliyun_docker_install.sh && rm -r ./docker_install
 
-#修改docker.server
+```shell
+curl -s  https://raw.githubusercontent.com/jy1779/docker/master/install/aliyun_docker_install.sh | bash
+```
+
+修改docker.server
+
+```shell
 LINE=$(grep -n ExecStart /lib/systemd/system/docker.service|awk -F : '{print $1}')
 EXECSTARTPOST='ExecStartPost=/sbin/iptables -I FORWARD -s 0.0.0.0/0 -j ACCEPT'
 sed "$LINE a$EXECSTARTPOST" -i /lib/systemd/system/docker.service
 #重启docker
 systemctl daemon-reload && service docker restart
-#关闭防火墙
+```
+
+关闭防火墙
+
+```shell
 ufw disable && ufw status
-#写入配置文件
+```
+
+写入配置文件
+
+```shell
 cat <<EOF > /etc/sysctl.d/k8s.conf
 net.ipv4.ip_forward = 1
 net.bridge.bridge-nf-call-ip6tables = 1
 net.bridge.bridge-nf-call-iptables = 1
 EOF
+```
 
-#生效配置文件
+生效配置文件
+
+```shell
 sysctl -p /etc/sysctl.d/k8s.conf
-#添加hosts文件
+```
+
+添加hosts文件
+
+```shell
 echo -e "192.168.1.72 master\n192.168.1.73 node01" >> /etc/hosts
+```
+
+
 
 2、获取kubenetes
+
+```shell
 git clone https://code.aliyun.com/jy1779/kubernetes.git
 #解压kubernetes-bins,添加到环境变量
 tar xf ./kubernetes/kubernetes-bins.tar.gz -C /usr/local/sbin/ && rm -f ./kubernetes/kubernetes-bins.tar.gz
 echo 'export PATH=$PATH:/usr/local/sbin/kubernetes-bins' >> /etc/profile && source /etc/profile
+```
+
 3、生成配置文件
+
+```shell
 cd /root/kubernetes/kubernetes-starter/
 修改配置文件
 vim config.properties
@@ -46,8 +74,6 @@ ETCD_ENDPOINTS=https://192.168.1.72:2379,https://192.168.1.73:2379,https://192.1
 
 #kubernetes主节点ip地址, eg: 192.168.1.102
 MASTER_IP=192.168.1.72
-
-```shell
 root@master:~/kubernetes/kubernetes-starter# ./gen-config.sh with-ca
 ====替换变量列表====
 BIN_PATH=/usr/local/sbin/kubernetes-bins
@@ -75,10 +101,11 @@ worker-node/kubelet.service
 worker-node/kube-proxy.service
 =================
 配置生成成功，位置: /root/kubernetes/kubernetes-starter/target
-
 ```
 
 4、安装cfssl
+
+```shell
 wget -q --show-progress --https-only --timestamping \
   https://pkg.cfssl.org/R1.2/cfssl_linux-amd64 \
   https://pkg.cfssl.org/R1.2/cfssljson_linux-amd64
@@ -89,8 +116,13 @@ mv cfssl_linux-amd64 /usr/local/bin/cfssl
 mv cfssljson_linux-amd64 /usr/local/bin/cfssljson
 #验证
 cfssl version
+```
+
+
 
 5、生成根证书（主节点）
+
+```shell
 #所有证书相关的东西都放在这
 mkdir -p /etc/kubernetes/ca
 #准备生成证书的配置文件
@@ -101,10 +133,17 @@ cd /etc/kubernetes/ca
 
 cfssl gencert -initca ca-csr.json | cfssljson -bare ca
 
+```
+
+
+
+
+
 6、部署etcd
 6.1 准备证书
 etcd节点需要提供给其他服务访问，就要验证其他服务的身份，所以需要一个标识自己监听服务的server证书，当有多个etcd节点的时候也需要client证书与etcd集群其他节点交互，当然也可以client和server使用同一个证书因为它们本质上没有区别。
 
+```shell
 #etcd证书放在这
 mkdir -p /etc/kubernetes/ca/etcd
 #准备etcd证书配置
@@ -112,10 +151,10 @@ cp ~/kubernetes/kubernetes-starter/target/ca/etcd/etcd-csr.json /etc/kubernetes/
 cd /etc/kubernetes/ca/etcd/
 #使用根证书(ca.pem)签发etcd证书
 cfssl gencert \
-​        -ca=/etc/kubernetes/ca/ca.pem \
-​        -ca-key=/etc/kubernetes/ca/ca-key.pem \
-​        -config=/etc/kubernetes/ca/ca-config.json \
-​        -profile=kubernetes etcd-csr.json | cfssljson -bare etcd
+        -ca=/etc/kubernetes/ca/ca.pem \
+        -ca-key=/etc/kubernetes/ca/ca-key.pem \
+        -config=/etc/kubernetes/ca/ca-config.json \
+        -profile=kubernetes etcd-csr.json | cfssljson -bare etcd
 #跟之前类似生成三个文件etcd.csr是个中间证书请求文件，我们最终要的是etcd-key.pem和etcd.pem
 ls
 etcd.csr  etcd-csr.json  etcd-key.pem  etcd.pem
@@ -146,19 +185,23 @@ ETCDCTL_API=3 etcdctl \
 
 https://192.168.1.72:2379 is healthy: successfully committed proposal: took = 10.408412ms
 
+```
+
 7、部署APIServer（主节点）
 #准备证书
 #api-server证书放在这，api-server是核心，文件夹叫kubernetes吧，如果想叫apiserver也可以，不过相关的地方都需要修改哦
+
+```shell
 mkdir -p /etc/kubernetes/ca/kubernetes
 #准备apiserver证书配置
 cp ~/kubernetes/kubernetes-starter/target/ca/kubernetes/kubernetes-csr.json /etc/kubernetes/ca/kubernetes/
 #使用根证书(ca.pem)签发kubernetes证书
 cd /etc/kubernetes/ca/kubernetes/
 cfssl gencert \
-​        -ca=/etc/kubernetes/ca/ca.pem \
-​        -ca-key=/etc/kubernetes/ca/ca-key.pem \
-​        -config=/etc/kubernetes/ca/ca-config.json \
-​        -profile=kubernetes kubernetes-csr.json | cfssljson -bare kubernetes
+        -ca=/etc/kubernetes/ca/ca.pem \
+        -ca-key=/etc/kubernetes/ca/ca-key.pem \
+        -config=/etc/kubernetes/ca/ca-config.json \
+        -profile=kubernetes kubernetes-csr.json | cfssljson -bare kubernetes
 #跟之前类似生成三个文件kubernetes.csr是个中间证书请求文件，我们最终要的是kubernetes-key.pem和kubernetes.pem
 ls
 kubernetes.csr  kubernetes-csr.json  kubernetes-key.pem  kubernetes.pem
@@ -170,7 +213,7 @@ head -c 16 /dev/urandom | od -An -t x | tr -d ' '
 root@master:/etc/kubernetes/ca/kubernetes# head -c 16 /dev/urandom | od -An -t x | tr -d ' '
 97e8c07dce2b2bab69cfd3162d5383c9
 
-echo "97e8c07dce2b2bab69cfd3162d5383c9,kubelet-bootstrap,10001,\"system:kubelet-bootstrap\"" > /etc/kubernetes/ca/kubernetes/token.csv
+echo "97e8c07dce2b2bab69cfd3162d5383c9,kubelet-bootstrap,10001,"system:kubelet-bootstrap"" > /etc/kubernetes/ca/kubernetes/token.csv
 
 #启动api-server服务
 cp ~/kubernetes/kubernetes-starter/target/master-node/kube-apiserver.service /lib/systemd/system/
@@ -178,8 +221,12 @@ systemctl enable kube-apiserver.service
 service kube-apiserver start
 journalctl -f -u kube-apiserver
 
+```
+
 8、部署controller-manager
 controller-manager一般与api-server在同一台机器上，所以可以使用非安全端口与api-server通讯，不需要生成证书和私钥。
+
+```shell
 cp ~/kubernetes/kubernetes-starter/target/master-node/kube-controller-manager.service /lib/systemd/system/
 systemctl enable kube-controller-manager.service
 service kube-controller-manager start
@@ -190,22 +237,25 @@ cp ~/kubernetes/kubernetes-starter/target/master-node/kube-scheduler.service /li
 systemctl enable kube-scheduler.service
 service kube-scheduler start
 journalctl -f -u kube-scheduler
+```
 
 
 
 9、配置kubectl
 9.1准备证书
 #kubectl证书放在这，由于kubectl相当于系统管理员，我们使用admin命名
+
+```shell
 mkdir -p /etc/kubernetes/ca/admin
 #准备admin证书配置 - kubectl只需客户端证书，因此证书请求中 hosts 字段可以为空
 cp ~/kubernetes/kubernetes-starter/target/ca/admin/admin-csr.json /etc/kubernetes/ca/admin/
 #使用根证书(ca.pem)签发admin证书
 cd /etc/kubernetes/ca/admin/
 cfssl gencert \
-​        -ca=/etc/kubernetes/ca/ca.pem \
-​        -ca-key=/etc/kubernetes/ca/ca-key.pem \
-​        -config=/etc/kubernetes/ca/ca-config.json \
-​        -profile=kubernetes admin-csr.json | cfssljson -bare admin
+        -ca=/etc/kubernetes/ca/ca.pem \
+        -ca-key=/etc/kubernetes/ca/ca-key.pem \
+        -config=/etc/kubernetes/ca/ca-config.json \
+        -profile=kubernetes admin-csr.json | cfssljson -bare admin
 #我们最终要的是admin-key.pem和admin.pem
 ls
 admin.csr  admin-csr.json  admin-key.pem  admin.pem
@@ -213,17 +263,17 @@ admin.csr  admin-csr.json  admin-key.pem  admin.pem
 配置kubectl文件
 #指定apiserver的地址和证书位置
 kubectl config set-cluster kubernetes \
-​        --certificate-authority=/etc/kubernetes/ca/ca.pem \
-​        --embed-certs=true \
-​        --server=https://192.168.1.72:6443
+        --certificate-authority=/etc/kubernetes/ca/ca.pem \
+        --embed-certs=true \
+        --server=https://192.168.1.72:6443
 #设置客户端认证参数，指定admin证书和秘钥
 kubectl config set-credentials admin \
-​        --client-certificate=/etc/kubernetes/ca/admin/admin.pem \
-​        --embed-certs=true \
-​        --client-key=/etc/kubernetes/ca/admin/admin-key.pem
+        --client-certificate=/etc/kubernetes/ca/admin/admin.pem \
+        --embed-certs=true \
+        --client-key=/etc/kubernetes/ca/admin/admin-key.pem
 #关联用户和集群
 kubectl config set-context kubernetes \
-​        --cluster=kubernetes --user=admin
+        --cluster=kubernetes --user=admin
 #设置当前上下文
 kubectl config use-context kubernetes
 #设置结果就是一个配置文件，可以看看内容
@@ -233,6 +283,10 @@ cat ~/.kube/config
 验证master节点
 kubectl get componentstatus
 
+```
+
+
+
 10.部署CalicoNode
 Calico实现了CNI接口，是kubernetes网络方案的一种选择，它一个纯三层的数据中心网络方案（不需要Overlay），并且与OpenStack、Kubernetes、AWS、GCE等IaaS和容器平台都有良好的集成。 Calico在每一个计算节点利用Linux Kernel实现了一个高效的vRouter来负责数据转发，而每个vRouter通过BGP协议负责把自己上运行的workload的路由信息像整个Calico网络内传播——小规模部署可以直接互联，大规模下可通过指定的BGP route reflector来完成。 这样保证最终所有的workload之间的数据流量都是通过IP路由的方式完成互联的。
 
@@ -240,20 +294,21 @@ Calico实现了CNI接口，是kubernetes网络方案的一种选择，它一个�
 
 后续可以看到calico证书用在四个地方：
 
-    calico/node 这个docker 容器运行时访问 etcd 使用证书
-    cni 配置文件中，cni 插件需要访问 etcd 使用证书
-    calicoctl 操作集群网络时访问 etcd 使用证书
-    calico/kube-controllers 同步集群网络策略时访问 etcd 使用证书
+```shell
+calico/node 这个docker 容器运行时访问 etcd 使用证书
+cni 配置文件中，cni 插件需要访问 etcd 使用证书
+calicoctl 操作集群网络时访问 etcd 使用证书
+calico/kube-controllers 同步集群网络策略时访问 etcd 使用证书
 #calico证书放在这
 mkdir -p /etc/kubernetes/ca/calico
 #准备calico证书配置 - calico只需客户端证书，因此证书请求中 hosts 字段可以为空
 cp ~/kubernetes/kubernetes-starter/target/ca/calico/calico-csr.json /etc/kubernetes/ca/calico/
 cd /etc/kubernetes/ca/calico/
 cfssl gencert \
-​        -ca=/etc/kubernetes/ca/ca.pem \
-​        -ca-key=/etc/kubernetes/ca/ca-key.pem \
-​        -config=/etc/kubernetes/ca/ca-config.json \
-​        -profile=kubernetes calico-csr.json | cfssljson -bare calico
+        -ca=/etc/kubernetes/ca/ca.pem \
+        -ca-key=/etc/kubernetes/ca/ca-key.pem \
+        -config=/etc/kubernetes/ca/ca-config.json \
+        -profile=kubernetes calico-csr.json | cfssljson -bare calico
 #我们最终要的是calico-key.pem和calico.pem
 ls 
 calico.csr  calico-csr.json  calico-key.pem  calico.pem
@@ -264,14 +319,21 @@ service kube-calico start
 journalctl -f -u kube-calico
 #查看节点情况
 calicoctl node status
+```
 
-部署kuberneter节点
 
-#1.1安装docker
-git clone https://code.aliyun.com/jy1779/docker_install.git
-./docker_install/aliyun_docker_install.sh && rm -r ./docker_install
-#扩展kuberneter节点
-git clone https://code.aliyun.com/jy1779/kubernetes.git
+11.部署kuberneter节点
+
+1.安装docker
+
+```shell
+curl -s  https://raw.githubusercontent.com/jy1779/docker/master/install/aliyun_docker_install.sh | bash
+```
+
+2.获取kuberneter二进制文件
+
+```shell
+git clone https://code.aliyun.com/jy1779/kubernetes.git	
 #解压kubernetes-bins,添加到环境变量
 tar xf ./kubernetes/kubernetes-bins.tar.gz -C /usr/local/sbin/
 echo 'export PATH=$PATH:/usr/local/sbin/kubernetes-bins' >> /etc/profile && source /etc/profile
@@ -344,17 +406,17 @@ cd /etc/kubernetes/
 
 #创建bootstrap.kubeconfig
 kubectl config set-cluster kubernetes \
-​        --certificate-authority=/etc/kubernetes/ca/ca.pem \
-​        --embed-certs=true \
-​        --server=https://192.168.1.72:6443 \
-​        --kubeconfig=bootstrap.kubeconfig
+        --certificate-authority=/etc/kubernetes/ca/ca.pem \
+        --embed-certs=true \
+        --server=https://192.168.1.72:6443 \
+        --kubeconfig=bootstrap.kubeconfig
 kubectl config set-credentials kubelet-bootstrap \
-​        --token=97e8c07dce2b2bab69cfd3162d5383c9 \
-​        --kubeconfig=bootstrap.kubeconfig
+        --token=97e8c07dce2b2bab69cfd3162d5383c9 \
+        --kubeconfig=bootstrap.kubeconfig
 kubectl config set-context default \
-​        --cluster=kubernetes \
-​        --user=kubelet-bootstrap \
-​        --kubeconfig=bootstrap.kubeconfig
+        --cluster=kubernetes \
+        --user=kubelet-bootstrap \
+        --kubeconfig=bootstrap.kubeconfig
 kubectl config use-context default --kubeconfig=bootstrap.kubeconfig
 
 准备cni
@@ -402,35 +464,39 @@ cd /etc/kubernetes/ca/kube-proxy/
 #使用根证书(ca.pem)签发calico证书
 
 cfssl gencert \
-​        -ca=/etc/kubernetes/ca/ca.pem \
-​        -ca-key=/etc/kubernetes/ca/ca-key.pem \
-​        -config=/etc/kubernetes/ca/ca-config.json \
-​        -profile=kubernetes kube-proxy-csr.json | cfssljson -bare kube-proxy
+        -ca=/etc/kubernetes/ca/ca.pem \
+        -ca-key=/etc/kubernetes/ca/ca-key.pem \
+        -config=/etc/kubernetes/ca/ca-config.json \
+        -profile=kubernetes kube-proxy-csr.json | cfssljson -bare kube-proxy
 
 
 
 cd /etc/kubernetes/
 
 kubectl config set-cluster kubernetes \
-​        --certificate-authority=/etc/kubernetes/ca/ca.pem \
-​        --embed-certs=true \
-​        --server=https://192.168.1.72:6443 \
-​        --kubeconfig=kube-proxy.kubeconfig
+        --certificate-authority=/etc/kubernetes/ca/ca.pem \
+        --embed-certs=true \
+        --server=https://192.168.1.72:6443 \
+        --kubeconfig=kube-proxy.kubeconfig
 kubectl config set-credentials kube-proxy \
-​        --client-certificate=/etc/kubernetes/ca/kube-proxy/kube-proxy.pem \
-​        --client-key=/etc/kubernetes/ca/kube-proxy/kube-proxy-key.pem \
-​        --embed-certs=true \
-​        --kubeconfig=kube-proxy.kubeconfig
+        --client-certificate=/etc/kubernetes/ca/kube-proxy/kube-proxy.pem \
+        --client-key=/etc/kubernetes/ca/kube-proxy/kube-proxy-key.pem \
+        --embed-certs=true \
+        --kubeconfig=kube-proxy.kubeconfig
 kubectl config set-context default \
-​        --cluster=kubernetes \
-​        --user=kube-proxy \
-​        --kubeconfig=kube-proxy.kubeconfig
+        --cluster=kubernetes \
+        --user=kube-proxy \
+        --kubeconfig=kube-proxy.kubeconfig
 kubectl config use-context default --kubeconfig=kube-proxy.kubeconfig
 
 cp ~/kubernetes/kubernetes-starter/target/worker-node/kube-proxy.service /lib/systemd/system/
 systemctl daemon-reload
 apt install conntrack #没有安装
 service kube-proxy start
+
+```
+
+
 
 验证kube-proxy
 

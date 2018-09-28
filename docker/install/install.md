@@ -16,5 +16,3 @@
    ```shell
    curl -s https://raw.githubusercontent.com/jy1779/docker/master/install/install_docker-compose.sh | bash
    ```
-
-
