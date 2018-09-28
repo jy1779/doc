@@ -1,4 +1,4 @@
-k8s etcd新增集群节点
+# k8s etcd新增集群节点
 
 etcd执行添加节点
 
