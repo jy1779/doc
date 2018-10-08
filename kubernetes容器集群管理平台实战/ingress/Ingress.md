@@ -1,6 +1,8 @@
 # Ingress
 
-部署ingress-nginx
+### 部署ingress
+
+下载：[配置文件](https://github.com/jy1779/doc/raw/master/kubernetes%E5%AE%B9%E5%99%A8%E9%9B%86%E7%BE%A4%E7%AE%A1%E7%90%86%E5%B9%B3%E5%8F%B0%E5%AE%9E%E6%88%98/ingress/Ingress.zip)
 
 ```shell
 kubectl apply -f namespace.yaml 
@@ -9,12 +11,30 @@ kubectl apply -f tcp-services-configmap.yaml
 kubectl apply -f udp-services-configmap.yaml 
 kubectl apply -f rbac.yaml
 kubectl apply -f deployment.yaml
-
 ```
 
+配置http访问
 
+```shell
+root@master:~/kubernetes/service# cat http.yaml 
+apiVersion: extensions/v1beta1
+kind: Ingress
+metadata:
+  name: https-tests
+spec:
+  rules:
+  - host: www.jonny.com
+    http:
+      paths:
+      - backend:
+          serviceName: nginx-service
+          servicePort: 80
+root@master:~/kubernetes/service# kubectl apply -f http.yaml
+```
 
-https
+浏览器访问：http://www.jonny.com/
+
+配置https访问
 
 生成证书
 
@@ -166,26 +186,27 @@ https
    
    ```
 
+7. 创建ingress
 
-```yaml
-Ingress TLS测试：
-kubectl create secret tls ingress-secret --key aliangedu-key.pem --cert aliangedu.pem
+   ```shell
+   root@master:~/kubernetes/service/https# cat https.yaml
+   apiVersion: extensions/v1beta1
+   kind: Ingress
+   metadata:
+     name: https-test
+   spec:
+     tls:
+     - hosts:
+       - www.jonny.com
+       secretName: jonny-https
+     rules:
+     - host: www.jonny.com
+       http:
+         paths:
+         - backend:
+             serviceName: nginx-service
+             servicePort: 80
+   kubectl apply -f https.yaml
+   ```
 
-apiVersion: extensions/v1beta1
-kind: Ingress
-metadata:
-  name: https-test
-spec:
-  tls:
-  - hosts:
-    - www.aliangedu.com
-    secretName: ingress-secret
-  rules:
-  - host: www.aliangedu.com
-    http:
-      paths:
-      - backend:
-          serviceName: nginx
-          servicePort: 88
-```
-
+8. 浏览器访问Https：https://www.jonny.com/
