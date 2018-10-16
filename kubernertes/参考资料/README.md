@@ -1,0 +1,1 @@
+k8s api：https://kubernetes.io/docs/reference/generated/kubernetes-api/v1.11/
