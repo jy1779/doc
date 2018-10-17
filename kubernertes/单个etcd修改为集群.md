@@ -140,7 +140,7 @@ c39c45ea12ff2451, started, 192.168.1.73, https://192.168.1.73:2380, https://192.
 
 ETCDCTL_API=3 etcdctl   --endpoints=https://192.168.1.74:2379  --cacert=/etc/kubernetes/ca/ca.pem   --cert=/etc/kubernetes/ca/etcd/etcd.pem   --key=/etc/kubernetes/ca/etcd/etcd-key.pem get / --prefix --keys-only
 
-备份etcd
+
 
 
 

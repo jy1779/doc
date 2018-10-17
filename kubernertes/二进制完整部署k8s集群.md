@@ -288,21 +288,21 @@ kubectl config use-context kubernetes
 
 cat ~/.kube/config
 
-# 验证master节点,etcd-1和etcd-2还没有部署
+# 验证master组件
+# 以下显示etcd-1、etc-2为Unhealthy是正常的，原因是我们还没有部署etcd-1、etcd-2
 root@master:/etc/kubernetes/ca/admin# kubectl get componentstatus
 NAME                 STATUS      MESSAGE                                                                                            ERROR
 etcd-2               Unhealthy   Get https://192.168.1.74:2379/health: dial tcp 192.168.1.74:2379: getsockopt: connection refused   
-scheduler            Healthy     ok                                                                                                 
-etcd-1               Unhealthy   Get https://192.168.1.73:2379/health: dial tcp 192.168.1.73:2379: getsockopt: connection refused   
 controller-manager   Healthy     ok                                                                                                 
+etcd-1               Unhealthy   Get https://192.168.1.73:2379/health: dial tcp 192.168.1.73:2379: getsockopt: connection refused   
+scheduler            Healthy     ok                                                                                                 
 etcd-0               Healthy     {"health": "true"} 
 
 # 创建kubelet-bootstrap绑定
 kubectl create clusterrolebinding kubelet-bootstrap --clusterrole=system:node-bootstrapper --user=kubelet-bootstrap
-
 ```
 
-1.1.8 部署Calico网络
+### 1.1.8 部署Calico网络
 
 > Calico实现了CNI接口，是kubernetes网络方案的一种选择，它一个纯三层的数据中心网络方案（不需要Overlay），并且与OpenStack、Kubernetes、AWS、GCE等IaaS和容器平台都有良好的集成。 Calico在每一个计算节点利用Linux Kernel实现了一个高效的vRouter来负责数据转发，而每个vRouter通过BGP协议负责把自己上运行的workload的路由信息像整个Calico网络内传播——小规模部署可以直接互联，大规模下可通过指定的BGP route reflector来完成。 这样保证最终所有的workload之间的数据流量都是通过IP路由的方式完成互联的。
 
@@ -328,10 +328,12 @@ calico.csr  calico-csr.json  calico-key.pem  calico.pem
 #启动kube-calico.service 服务
 cp ~/kubernetes/kubernetes-starter/target/all-node/kube-calico.service /lib/systemd/system/
 systemctl enable kube-calico.service
-service kube-calico start
+#启动kube-calico服务需要下载镜像
+service kube-calico start   
 journalctl -f -u kube-calico
-#查看节点情况
-calicoctl node status
+#查看节点情况，显示如下内容是因为还没有calico节点，属于正常情况
+root@master:/etc/kubernetes/ca/calico# calicoctl node status
+Calico process is not running.
 ```
 
 ## 1.2 部署Kubernetes集群Node
@@ -379,6 +381,7 @@ EOF
 sysctl -p /etc/sysctl.d/k8s.conf
 
 #修改配置文件config.properties
+root@node01:~# cd /root/kubernetes/kubernetes-starter/
 root@node01:~/kubernetes/kubernetes-starter# cat config.properties 
 #kubernetes二进制文件目录,eg: /home/michael/bin
 BIN_PATH=/usr/local/sbin/kubernetes-bins
@@ -420,8 +423,15 @@ cp ~/kubernetes/kubernetes-starter/target/all-node/kube-calico.service /lib/syst
 systemctl enable kube-calico.service
 # 启动kube-calico.service 服务
 service kube-calico start
-# 查看calico节点
+# 查看calico节点，可以看到master节点的calico
 calicoctl node status
+IPv4 BGP status
++--------------+-------------------+-------+----------+-------------+
+| PEER ADDRESS |     PEER TYPE     | STATE |  SINCE   |    INFO     |
++--------------+-------------------+-------+----------+-------------+
+| 192.168.1.72 | node-to-node mesh | up    | 09:03:00 | Established |
++--------------+-------------------+-------+----------+-------------+
+
 ```
 
 ### 1.2.4 部署Kubelet
@@ -462,19 +472,22 @@ service kubelet start
 ### 1.2.5 Master签发证书
 
 ```shell
-# 在master服务执行
+# 在master服务器执行
 # 查看csr
 kubectl get csr
 NAME                                                   AGE       REQUESTOR           CONDITION
 node-csr-xNqwjv6k56NdkqbEpoinSOKEekPXrMvI6EgUGzTrngk   1m        kubelet-bootstrap   Pending
 #允许请求
 kubectl get csr|grep 'Pending' | awk '{print $1}'| xargs kubectl certificate approve
+
 certificatesigningrequest "node-csr-xNqwjv6k56NdkqbEpoinSOKEekPXrMvI6EgUGzTrngk" approved
 # 再次查看 kubectl get csr
 NAME                                                   AGE       REQUESTOR           CONDITION
 node-csr-xNqwjv6k56NdkqbEpoinSOKEekPXrMvI6EgUGzTrngk   1m        kubelet-bootstrap   Approved,Issued
 # 验证节点
-kubectl get node
+root@master:/etc/kubernetes/ca/calico# kubectl get node
+NAME           STATUS    ROLES     AGE       VERSION
+192.168.1.73   Ready     <none>    24s       v1.9.0
 ```
 
 ### 1.2.6 部署kube-proxy
@@ -517,19 +530,53 @@ cp ~/kubernetes/kubernetes-starter/target/worker-node/kube-proxy.service /lib/sy
 systemctl enable kube-proxy
 # 启动kube-proxy服务
 service kube-proxy start
-# 验证-proxy
-root@master:~# kubectl get pods
+# 创建pods,验证kube-proxy
+root@master:~/kubernetes/service# cat nginx-deployment.yaml 
+apiVersion: apps/v1beta1
+kind: Deployment
+metadata:
+  name: nginx
+  annotations:
+    nginx.ingress.kubernetes.io/secure-backends: "true"
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: nginx
+    spec:
+      containers:
+      - name: nginx
+        image: registry.cn-hangzhou.aliyuncs.com/jonny/nginx:1.9.14
+        ports:
+          - containerPort: 80
+root@master:~/kubernetes/service# kubectl apply -f nginx-deployment.yaml 
+root@master:~/kubernetes/service# kubectl get pods
 NAME                     READY     STATUS    RESTARTS   AGE
-nginx-65dbdf6899-s66w6   1/1       Running   0          37m
-root@master:~# kubectl get service
-NAME            TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)   AGE
-kubernetes      ClusterIP   10.68.0.1     <none>        443/TCP   1h
-nginx-service   ClusterIP   10.68.81.75   <none>        80/TCP    35m
-root@master:~# kubectl exec -it nginx-65dbdf6899-s66w6 bash
-bash-4.3# curl -I  10.68.81.75
+nginx-65dbdf6899-x52ws   1/1       Running   0          2m
+
+root@master:~/kubernetes/service# cat nginx-service.yaml 
+apiVersion: v1
+kind: Service
+metadata:
+  name: nginx-service
+spec:
+  selector:
+    app: nginx
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 80
+root@master:~/kubernetes/service# kubectl get service
+NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+kubernetes      ClusterIP   10.68.0.1       <none>        443/TCP   4h
+nginx-service   ClusterIP   10.68.142.199   <none>        80/TCP    3m
+
+#进入容器验证，访问ClusterIP
+bash-4.3# curl -I 10.68.142.199
 HTTP/1.1 200 OK
 Server: nginx/1.9.14
-Date: Wed, 26 Sep 2018 09:40:18 GMT
+Date: Wed, 17 Oct 2018 06:47:52 GMT
 Content-Type: text/html
 Content-Length: 612
 Last-Modified: Wed, 21 Sep 2016 08:11:20 GMT
@@ -538,16 +585,17 @@ ETag: "57e240a8-264"
 Accept-Ranges: bytes
 
 # 在节点上验证
-root@node01:/etc/kubernetes/ca/kube-proxy# curl -I  10.68.81.75
+root@node01:/etc/kubernetes# curl -I 10.68.142.199
 HTTP/1.1 200 OK
 Server: nginx/1.9.14
-Date: Wed, 26 Sep 2018 09:40:24 GMT
+Date: Wed, 17 Oct 2018 06:48:38 GMT
 Content-Type: text/html
 Content-Length: 612
 Last-Modified: Wed, 21 Sep 2016 08:11:20 GMT
 Connection: keep-alive
 ETag: "57e240a8-264"
 Accept-Ranges: bytes
+
 ```
 
 ## 1.3 部署Kube-dns
@@ -555,6 +603,7 @@ Accept-Ranges: bytes
 ### 1.3.1 创建Kube-dns服务
 
 ```yaml
+# cd /root/kubernetes/kubernetes-starter/target/services/
 # cat kube-dns.yaml
 ---
 apiVersion: v1
@@ -746,23 +795,32 @@ spec:
       serviceAccountName: kube-dns
       
 # kubectl apply -f kube-dns.yaml
+root@master:~/kubernetes/kubernetes-starter/target/services# kubectl -n kube-system get pods
+NAME                        READY     STATUS    RESTARTS   AGE
+kube-dns-565c8d55b4-72dhw   3/3       Running   0          1m
+
 ```
 
 ### 1.3.2 验证Kube-dns
 
 ```shell
-root@master:~# kubectl get pods
+root@master:~/kubernetes/kubernetes-starter/target/services# kubectl get pods
 NAME                     READY     STATUS    RESTARTS   AGE
-nginx-65dbdf6899-s66w6   1/1       Running   0          34m
-root@master:~# kubectl get service
-NAME            TYPE        CLUSTER-IP    EXTERNAL-IP   PORT(S)   AGE
-kubernetes      ClusterIP   10.68.0.1     <none>        443/TCP   1h
-nginx-service   ClusterIP   10.68.81.75   <none>        80/TCP    32m
-root@master:~# kubectl exec -it nginx-65dbdf6899-s66w6 bash
-bash-4.3# curl -I nginx-service
+nginx-65dbdf6899-x52ws   1/1       Running   0          14m
+root@master:~/kubernetes/kubernetes-starter/target/services# kubectl get service
+NAME            TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)   AGE
+kubernetes      ClusterIP   10.68.0.1       <none>        443/TCP   4h
+nginx-service   ClusterIP   10.68.142.199   <none>        80/TCP    13m
+root@master:~# kubectl exec -it nginx-65dbdf6899-x52ws bash
+bash-4.3# nslookup nginx-service
+nslookup: can't resolve '(null)': Name does not resolve
+
+Name:      nginx-service
+Address 1: 10.68.142.199 nginx-service.default.svc.cluster.local
+bash-4.3# curl -I  nginx-service  #使用服务名访问
 HTTP/1.1 200 OK
 Server: nginx/1.9.14
-Date: Wed, 26 Sep 2018 09:37:27 GMT
+Date: Wed, 17 Oct 2018 06:56:43 GMT
 Content-Type: text/html
 Content-Length: 612
 Last-Modified: Wed, 21 Sep 2016 08:11:20 GMT
@@ -777,8 +835,7 @@ Accept-Ranges: bytes
 ### 1.4.1 创建Dashboard服务
 
 ```shell
-cat kube-dashboard.yaml 
-
+root@master:~/kubernetes/kubernetes-starter/target/services# cat kube-dashboard.yaml
 # Copyright 2017 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
@@ -948,16 +1005,29 @@ spec:
   selector:
     k8s-app: kubernetes-dashboard
   type: NodePort
-  
-  kubectl apply -f kube-dashboard.yaml 
+#查看pod
+root@master:~/kubernetes/kubernetes-starter/target/services# kubectl -n kube-system get pods
+NAME                                   READY     STATUS    RESTARTS   AGE
+kube-dns-565c8d55b4-72dhw              3/3       Running   0          12m
+kubernetes-dashboard-c6fdc9bcb-p6kvb   1/1       Running   0          1m
+#查看service NodePort暴露了9443端口，可以使用该端口访问dashboard
+root@master:~/kubernetes/kubernetes-starter/target/services# kubectl -n kube-system get service
+NAME                   TYPE        CLUSTER-IP     EXTERNAL-IP   PORT(S)         AGE
+kube-dns               ClusterIP   10.68.0.2      <none>        53/UDP,53/TCP   12m
+kubernetes-dashboard   NodePort    10.68.214.34   <none>        443:9443/TCP    1m
+root@master:~/kubernetes/kubernetes-starter/target/services# kubectl apply -f kube-dashboard.yaml 
+secret "kubernetes-dashboard-certs" created
+serviceaccount "kubernetes-dashboard" created
+role "kubernetes-dashboard-minimal" created
+rolebinding "kubernetes-dashboard-minimal" created
+deployment "kubernetes-dashboard" created
+service "kubernetes-dashboard" created
 ```
 
 ### 1.4.2 验证访问Dashboard
 
-URL：https://192.168.1.73:9443/#!/login
-
 ```shell
-cat kuadmin-role.yaml 
+root@master:~/kubernetes/role# cat admin-role.yaml
 kind: ClusterRoleBinding
 apiVersion: rbac.authorization.k8s.io/v1beta1
 metadata:
@@ -981,17 +1051,35 @@ metadata:
   labels:
     kubernetes.io/cluster-service: "true"
     addonmanager.kubernetes.io/mode: Reconcile
-# 创建绑定admin用户
-kubectl apply -f admin-role.yaml
-kubectl -n kube-system get secret admin-token-fjjgt
-NAME                TYPE                                  DATA      AGE
-admin-token-fjjgt   kubernetes.io/service-account-token   3         8m
+# 创建绑定admin
+root@master:~/kubernetes/role# kubectl apply -f admin-role.yaml 
+clusterrolebinding "admin" created
+serviceaccount "admin" created
+# 查看secret
+root@master:~/kubernetes/role# kubectl -n kube-system get secret |grep admin
+admin-token-8dmvq                  kubernetes.io/service-account-token   3         1m
 #查看token,使用该token登录dashboard
- kubectl -n kube-system  get secret admin-token-fjjgt -o jsonpath={.data.token}| base64 -d
- eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJrdWJlLXN5c3RlbSIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VjcmV0Lm5hbWUiOiJhZG1pbi10b2tlbi1zZHB4eiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50Lm5hbWUiOiJhZG1pbiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjBiNzkzODlhLWNjMzAtMTFlOC1hYjE4LTAwMGMyOTYzYWFjYyIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDprdWJlLXN5c3RlbTphZG1pbiJ9.g-J9hV2dP2O679QvSfX5ANnO3cwVcYU31UVj_WQXmg52dPCLtX9Y5UcFh9oZaw6r6zrgFvJuk3JEMfvCGEQSgfxp2JWMaS307mFXnqBbBK4VwWWHHbGg4b_BHO7O18uBpLplKjYPZtnkeWBj7Bgj-DuNcOrpBvZWXJrXFf4xLMfJYomMhpRIWIkGX_Vef504bw4NoGaJLMPGd9aUyjTkMr78vOdK-C9Vq_h5Aaf01PSlA_JJ0adLzZgFGrj_mGeA6m8PdQ93b2BAf7PY9vkvrgB_1YaursNmZ0XhxVRhSDZ3V6SuUjoTN8SmcTVd5BkcVVY_AbwHFSxxHcHRQ0M_WQ
+root@master:~/kubernetes/role# kubectl -n kube-system  get secret admin-token-8dmvq -o jsonpath={.data.token}| base64 -d
+eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJrdWJlLXN5c3RlbSIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VjcmV0Lm5hbWUiOiJhZG1pbi10b2tlbi04ZG12cSIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50Lm5hbWUiOiJhZG1pbiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjkxMjM2Njg2LWQxZGItMTFlOC05YTU5LTAwMGMyOTYzYWFjYyIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDprdWJlLXN5c3RlbTphZG1pbiJ9.YUTw4l8GsntcXsj467V9SWnwhX1JTrkGDNdQYd1OPJQ8IeQBghe43UKSFoFe-a1nmfTyOaMueXMdIUJXbsE1w7Byb21InpKmGNmwR0_KxLmydNVIA11hm062Apvt-Zf-ky0GOBNtM3_APvfmXSZuYV_5ZNC0PvHObF-azlSwcGtsCUUT-Zs2PuvPSh8OAbk2EBBvVDReOU-rNkL3vOiekb4Rjah1AE6bCbp7R4PSOv9_1BqCteLCxrEyE7G1c0D0wo5J3k3Ur_XZ0bW6SBU77RyZEx-8fzHQcQd1LObHfhsuRQRAR8pDyyn3g977h3seM4L2DLtQ-J0EhqGBtaycDw
+# 也可以使用这种方法
+root@master:~/kubernetes/role# kubectl -n kube-system describe secret admin-token-8dmvq
+Name:         admin-token-8dmvq
+Namespace:    kube-system
+Labels:       <none>
+Annotations:  kubernetes.io/service-account.name=admin
+              kubernetes.io/service-account.uid=91236686-d1db-11e8-9a59-000c2963aacc
+
+Type:  kubernetes.io/service-account-token
+
+Data
+====
+ca.crt:     1346 bytes
+namespace:  11 bytes
+token:      eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZpY2VhY2NvdW50Iiwia3ViZXJuZXRlcy5pby9zZXJ2aWNlYWNjb3VudC9uYW1lc3BhY2UiOiJrdWJlLXN5c3RlbSIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VjcmV0Lm5hbWUiOiJhZG1pbi10b2tlbi04ZG12cSIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50Lm5hbWUiOiJhZG1pbiIsImt1YmVybmV0ZXMuaW8vc2VydmljZWFjY291bnQvc2VydmljZS1hY2NvdW50LnVpZCI6IjkxMjM2Njg2LWQxZGItMTFlOC05YTU5LTAwMGMyOTYzYWFjYyIsInN1YiI6InN5c3RlbTpzZXJ2aWNlYWNjb3VudDprdWJlLXN5c3RlbTphZG1pbiJ9.YUTw4l8GsntcXsj467V9SWnwhX1JTrkGDNdQYd1OPJQ8IeQBghe43UKSFoFe-a1nmfTyOaMueXMdIUJXbsE1w7Byb21InpKmGNmwR0_KxLmydNVIA11hm062Apvt-Zf-ky0GOBNtM3_APvfmXSZuYV_5ZNC0PvHObF-azlSwcGtsCUUT-Zs2PuvPSh8OAbk2EBBvVDReOU-rNkL3vOiekb4Rjah1AE6bCbp7R4PSOv9_1BqCteLCxrEyE7G1c0D0wo5J3k3Ur_XZ0bW6SBU77RyZEx-8fzHQcQd1LObHfhsuRQRAR8pDyyn3g977h3seM4L2DLtQ-J0EhqGBtaycDw
+
 ```
 
-
+访问URL：https://192.168.1.73:9443/ 复制上面的token，选择令牌登录，下图：
 
 
 
