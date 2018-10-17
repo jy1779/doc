@@ -1081,5 +1081,5 @@ token:      eyJhbGciOiJSUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJrdWJlcm5ldGVzL3NlcnZ
 
 访问URL：https://192.168.1.73:9443/ 复制上面的token，选择令牌登录，下图：
 
-
+![](https://raw.githubusercontent.com/jy1779/doc/master/image/kubernetes/dashboard_login.png)
 
