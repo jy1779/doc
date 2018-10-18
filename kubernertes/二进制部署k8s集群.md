@@ -1598,12 +1598,196 @@ ETCDCTL_API=3 etcdctl   --endpoints=https://192.168.1.73:2379  --cacert=/etc/kub
    #最后的etcd-2节点不再演示部署，已经测试过没问题。
    ```
 
+## 1.7 部署监控(influxdb+heapster+grafana)
 
+```shell
+root@master:~/kubernetes/monitor# cat influxdb.yaml 
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: monitoring-influxdb
+  namespace: kube-system
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        task: monitoring
+        k8s-app: influxdb
+    spec:
+      containers:
+      - name: influxdb
+        image: registry.cn-hangzhou.aliyuncs.com/jonny/heapster-influxdb-amd64:v1.3.3
+        volumeMounts:
+        - mountPath: /data
+          name: influxdb-storage
+      volumes:
+      - name: influxdb-storage
+        emptyDir: {}
 
+---
 
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    task: monitoring
+    # For use as a Cluster add-on (https://github.com/kubernetes/kubernetes/tree/master/cluster/addons)
+    # If you are NOT using this as an addon, you should comment out this line.
+    kubernetes.io/cluster-service: 'true'
+    kubernetes.io/name: monitoring-influxdb
+  name: monitoring-influxdb
+  namespace: kube-system
+spec:
+  ports:
+  - port: 8086
+    targetPort: 8086
+  selector:
+    k8s-app: influxdb
+root@master:~/kubernetes/monitor# cat heapster.yaml 
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: heapster
+  namespace: kube-system
+---
+apiVersion: rbac.authorization.k8s.io/v1beta1
+kind: ClusterRoleBinding
+metadata:
+  name: heapster
+roleRef:
+  kind: ClusterRole
+  name: cluster-admin
+  apiGroup: rbac.authorization.k8s.io
+subjects:
+  - kind: ServiceAccount
+    name: heapster
+    namespace: kube-system
 
+---
 
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: heapster
+  namespace: kube-system
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        task: monitoring
+        k8s-app: heapster
+    spec:
+      serviceAccountName: heapster
+      containers:
+      - name: heapster
+        image: registry.cn-hangzhou.aliyuncs.com/jonny/heapster-amd64:v1.4.2
+        imagePullPolicy: IfNotPresent
+        command:
+        - /heapster
+        - --source=kubernetes:https://kubernetes.default
+        - --sink=influxdb:http://monitoring-influxdb:8086
 
+---
 
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    task: monitoring
+    # For use as a Cluster add-on (https://github.com/kubernetes/kubernetes/tree/master/cluster/addons)
+    # If you are NOT using this as an addon, you should comment out this line.
+    kubernetes.io/cluster-service: 'true'
+    kubernetes.io/name: Heapster
+  name: heapster
+  namespace: kube-system
+spec:
+  ports:
+  - port: 80
+    targetPort: 8082
+  selector:
+    k8s-app: heapster
+root@master:~/kubernetes/monitor# cat grafana.yaml 
+apiVersion: extensions/v1beta1
+kind: Deployment
+metadata:
+  name: monitoring-grafana
+  namespace: kube-system
+spec:
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        task: monitoring
+        k8s-app: grafana
+    spec:
+      containers:
+      - name: grafana
+        image: registry.cn-hangzhou.aliyuncs.com/jonny/heapster-grafana-amd64:v4.4.3
+        ports:
+          - containerPort: 3000
+            protocol: TCP
+        volumeMounts:
+        - mountPath: /var
+          name: grafana-storage
+        env:
+        - name: INFLUXDB_HOST
+          value: monitoring-influxdb
+        - name: GRAFANA_PORT
+          value: "3000"
+          # The following env variables are required to make Grafana accessible via
+          # the kubernetes api-server proxy. On production clusters, we recommend
+          # removing these env variables, setup auth for grafana, and expose the grafana
+          # service using a LoadBalancer or a public IP.
+        - name: GF_AUTH_BASIC_ENABLED
+          value: "false"
+        - name: GF_AUTH_ANONYMOUS_ENABLED
+          value: "true"
+        - name: GF_AUTH_ANONYMOUS_ORG_ROLE
+          value: Admin
+        - name: GF_SERVER_ROOT_URL
+          # If you're only using the API Server proxy, set this value instead:
+          value: /
+      volumes:
+      - name: grafana-storage
+        emptyDir: {}
+
+---
+
+apiVersion: v1
+kind: Service
+metadata:
+  labels:
+    # For use as a Cluster add-on (https://github.com/kubernetes/kubernetes/tree/master/cluster/addons)
+    # If you are NOT using this as an addon, you should comment out this line.
+    kubernetes.io/cluster-service: 'true'
+    kubernetes.io/name: monitoring-grafana
+  name: monitoring-grafana
+  namespace: kube-system
+spec:
+  # In a production setup, we recommend accessing Grafana through an external Loadbalancer
+  # or through a public IP.
+  # type: LoadBalancer
+  type: NodePort
+  ports:
+  - port : 80
+    targetPort: 3000
+  selector:
+    k8s-app: grafana
+root@master:~/kubernetes/monitor# kubectl apply -f influxdb.yaml
+root@master:~/kubernetes/monitor# kubectl apply -f heapster.yaml
+root@master:~/kubernetes/monitor# kubectl apply -f grafana.yaml
+root@master:~/kubernetes/monitor# kubectl -n kube-system get pods|grep  -E 'influxdb|grafana|heapster'
+heapster-7db7b86576-v48q6              1/1       Running   0          3m
+monitoring-grafana-6854bc4b4d-tz7gk    1/1       Running   0          3m
+monitoring-influxdb-789c759c45-6lqlb   1/1       Running   0          3m
+
+# 查看grafana，使用节点IP+26007访问，例如:http://192.168.1.73:26007
+root@master:~/kubernetes/monitor# kubectl -n kube-system get service|grep grafana
+monitoring-grafana     NodePort    10.68.182.115   <none>        80:26007/TCP    6m
+```
+
+访问URL：http://192.168.1.73:26007
 
 
