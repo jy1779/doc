@@ -1790,4 +1790,6 @@ monitoring-grafana     NodePort    10.68.182.115   <none>        80:26007/TCP   
 
 访问URL：http://192.168.1.73:26007
 
+![](https://raw.githubusercontent.com/jy1779/doc/master/image/kubernetes/grafana.png)
+
 
